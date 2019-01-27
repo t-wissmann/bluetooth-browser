@@ -20,9 +20,28 @@ class BluetoothDevice:
         pass
 
 
-class DeviceWidget:
-    def __init__(self):
-        pass
+class DeviceWidget(urwid.Text):
+    def __init__(self, proxy_object):
+        self.proxy_object = proxy_object
+        self.properties = dbus.Interface(proxy_object, 'org.freedesktop.DBus.Properties')
+        super(DeviceWidget, self).__init__(self.getDisplayLabel())
+
+    def getBluezProp(self, prop_name):
+        return self.properties.Get('org.bluez.Device1', prop_name)
+
+    def getBluezProps(self):
+        return self.properties.GetAll('org.bluez.Device1')
+
+    def getDisplayLabel(self):
+        def bool2str(b):
+            return 'x' if b else ' '
+        p = self.getBluezProps()
+        s = '{} ({})'.format(p['Name'], p['Address'])
+        s += '\n   '
+        s += '{}, {}'.format(
+            'paired' if p['Paired'] else 'unpaired',
+            'connected' if p['Connected'] else 'disconnected')
+        return s
 
 
 class BluetoothBrowser:
@@ -31,22 +50,31 @@ class BluetoothBrowser:
         ('device normal','', '', 'standout'),
         ('device select', 'black', 'dark green'),
         ]
-    def __init__(self, dbus_proxy):
+    def __init__(self, bus, service, hci_path):
         """
-        dbus_proxy is a proxy object to the bluetooth device, hci0
+        bus is the dbus bus
+        service is the service name
+        object_path is the main object path
         """
-        self.devices = [self.create_device_item(str(s))
-                        for s in dbus_child_paths(dbus_proxy)]
-        self.dbus_proxy = dbus_proxy
+        self.bus = bus
+        self.hci_path = hci_path
+        self.service = service
+        self.hci_object = bus.get_object(service, self.hci_path)
+        self.device_widgets = [self.create_device_item(p)
+                               for p in self.bluetooth_device_paths()]
+
+    def bluetooth_device_paths(self):
+        for s in dbus_child_paths(self.hci_object):
+            yield '/'.join([self.hci_path, s])
 
     def setup_view(self):
         """return a widget as the root widget"""
-        self.devices_walker = urwid.SimpleFocusListWalker(self.devices)
+        self.devices_walker = urwid.SimpleFocusListWalker(self.device_widgets)
         self.devicesList = urwid.ListBox(self.devices_walker)
         return self.devicesList
 
-    def create_device_item(self, name):
-        w = urwid.Text(name)
+    def create_device_item(self, object_path):
+        w = DeviceWidget(self.bus.get_object(self.service, object_path))
         w = urwid.AttrWrap(w, 'device normal', 'device select')
         return w
 
@@ -78,8 +106,7 @@ class BluetoothBrowser:
 def main():
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    proxy = bus.get_object('org.bluez', '/org/bluez/hci0')
-    BluetoothBrowser(proxy).main()
+    BluetoothBrowser(bus, 'org.bluez', '/org/bluez/hci0').main()
     return 0
 
 sys.exit(main())
