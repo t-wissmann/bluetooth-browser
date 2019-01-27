@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
+import sys
 import urwid
+import dbus.service
+from gi.repository import GObject
+from dbus.mainloop.glib import DBusGMainLoop
+from xml.etree import ElementTree
 
+def dbus_child_paths(obj):
+    """return the names of all children of a given object_path"""
+    iface = dbus.Interface(obj, 'org.freedesktop.DBus.Introspectable')
+    xml_string = iface.Introspect()
+    for child in ElementTree.fromstring(xml_string):
+        if child.tag == 'node':
+            yield child.attrib['name']
 
 class BluetoothDevice:
     """Wraper around a device that can be accessed via bluetooth"""
@@ -19,8 +31,13 @@ class BluetoothBrowser:
         ('device normal','', '', 'standout'),
         ('device select', 'black', 'dark green'),
         ]
-    def __init__(self):
-        self.devices = [self.create_device_item(str(s)) for s in range(1, 100)]
+    def __init__(self, dbus_proxy):
+        """
+        dbus_proxy is a proxy object to the bluetooth device, hci0
+        """
+        self.devices = [self.create_device_item(str(s))
+                        for s in dbus_child_paths(dbus_proxy)]
+        self.dbus_proxy = dbus_proxy
 
     def setup_view(self):
         """return a widget as the root widget"""
@@ -58,5 +75,11 @@ class BluetoothBrowser:
                               event_loop=urwid.GLibEventLoop())
         loop.run()
 
+def main():
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    proxy = bus.get_object('org.bluez', '/org/bluez/hci0')
+    BluetoothBrowser(proxy).main()
+    return 0
 
-BluetoothBrowser().main()
+sys.exit(main())
