@@ -42,6 +42,17 @@ class DeviceWidget(urwid.Text):
             'connected' if p['Connected'] else 'disconnected')
         return s
 
+    def on_key(self, key):
+        iface = dbus.Interface(self.proxy_object, 'org.bluez.Device1')
+        if key == 'enter':
+            if self.properties['Paired'] and not self.properties['Connected']:
+                iface.Connect()
+            elif not self.properties['Paired'] :
+                iface.Pair()
+        if key == 'd':
+            if self.properties['Connected']:
+                iface.Disconnect()
+
 class BluetoothBrowser:
     """Bluetooth browser main widget"""
     palette = [
@@ -67,22 +78,21 @@ class BluetoothBrowser:
             yield '/'.join([self.hci_path, s])
 
     def in_list(self, widget):
-        return urwid.AttrWrap(widget, \
+        return urwid.AttrMap(widget, \
                             'item normal', 'item select')
 
     def setup_view(self):
         """return a widget as the root widget"""
-        self.powered_checkbox = self.in_list(urwid.CheckBox("power",
-            on_state_change=self.cb_power
-            ))
-        self.scanning_checkbox = self.in_list(urwid.CheckBox("scanning",
-            on_state_change=self.cb_scan
-            ))
+        self.powered_checkbox = urwid.CheckBox("power",
+            on_state_change=self.cb_power)
+        self.scanning_checkbox = urwid.CheckBox("scanning",
+            on_state_change=self.cb_scan)
         self.list_widgets = \
             [self.powered_checkbox,
              self.scanning_checkbox] \
             + [self.create_device_item(p)
              for p in self.bluetooth_device_paths()]
+        self.list_widgets = [ self.in_list(w) for w in self.list_widgets]
         self.devices_walker = urwid.SimpleFocusListWalker(self.list_widgets)
         self.devicesList = urwid.ListBox(self.devices_walker)
         self.update_status()
@@ -121,26 +131,31 @@ class BluetoothBrowser:
 
     def create_device_item(self, object_path):
         w = DeviceWidget(self.bus.get_object(self.service, object_path), self)
-        w = urwid.AttrWrap(w, 'item normal', 'item select')
         return w
 
     def unhandled_input(self, key):
         if key in ('q', 'Q'):
             raise urwid.ExitMainLoop()
-        if key == 'k':
+        elif key == 'k':
             try:
                 self.devicesList.set_focus(self.devicesList.focus_position - 1)
             except IndexError:
                 pass
-        if key == 'j':
+        elif key == 'j':
             try:
                 self.devicesList.set_focus(self.devicesList.focus_position + 1)
             except IndexError:
                 pass
-        if key == 'g':
+        elif key == 'g':
             self.devicesList.set_focus(0)
-        if key == 'G':
+        elif key == 'G':
             self.devicesList.set_focus(len(self.devices) - 1)
+        else:
+            w,_ = focus = self.devicesList.get_focus()
+            w = w.original_widget
+            #print(str(w), file=sys.stderr)
+            if isinstance(w, DeviceWidget):
+                w.on_key(key)
 
     def redraw(self):
         self.loop.draw_screen()
