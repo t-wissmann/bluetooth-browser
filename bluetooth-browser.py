@@ -53,6 +53,9 @@ class BluetoothBrowser:
         self.hci_path = hci_path
         self.service = service
         self.hci_object = bus.get_object(service, self.hci_path)
+        iface = dbus.Interface(self.hci_object, 'org.freedesktop.DBus.Properties')
+        self.properties = iface.GetAll('org.bluez.Adapter1')
+        iface.connect_to_signal('PropertiesChanged', self.on_properties_changed)
 
     def bluetooth_device_paths(self):
         for s in dbus_child_paths(self.hci_object):
@@ -64,7 +67,7 @@ class BluetoothBrowser:
 
     def setup_view(self):
         """return a widget as the root widget"""
-        self.powered_checkbox = self.in_list(urwid.CheckBox("power (To be implemented)",
+        self.powered_checkbox = self.in_list(urwid.CheckBox("power",
             on_state_change=self.cb_power
             ))
         self.scanning_checkbox = self.in_list(urwid.CheckBox("scanning",
@@ -95,9 +98,16 @@ class BluetoothBrowser:
         else:
             bluez_iface.StopDiscovery()
 
+    def on_properties_changed(self, iface, new_values, sender=None):
+        if iface != 'org.bluez.Adapter1':
+            return
+        #print(new_values, file=sys.stderr)
+        for k, v in new_values.items():
+            self.properties[k] = v
+        self.update_status()
+        self.loop.draw_screen()
+
     def update_status(self):
-        prop_iface = dbus.Interface(self.hci_object, 'org.freedesktop.DBus.Properties')
-        self.properties = prop_iface.GetAll('org.bluez.Adapter1')
         self.powered_checkbox.set_state(self.properties['Powered'],
             do_callback=False)
         self.scanning_checkbox.set_state(self.properties['Discovering'],
@@ -129,10 +139,10 @@ class BluetoothBrowser:
 
     def main(self):
         widget = self.setup_view()
-        loop = urwid.MainLoop(widget, self.palette,
+        self.loop = urwid.MainLoop(widget, self.palette,
                               unhandled_input=self.unhandled_input,
                               event_loop=urwid.GLibEventLoop())
-        loop.run()
+        self.loop.run()
 
 def main():
     DBusGMainLoop(set_as_default=True)
