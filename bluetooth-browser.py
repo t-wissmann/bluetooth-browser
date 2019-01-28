@@ -17,19 +17,24 @@ def dbus_child_paths(obj):
 
 
 class DeviceWidget(urwid.Text):
-    def __init__(self, proxy_object):
+    def __init__(self, proxy_object, parent):
         self.proxy_object = proxy_object
-        self.properties = dbus.Interface(proxy_object, 'org.freedesktop.DBus.Properties')
+        self.prop_iface = dbus.Interface(proxy_object, 'org.freedesktop.DBus.Properties')
+        self.properties = self.prop_iface.GetAll('org.bluez.Device1')
         super(DeviceWidget, self).__init__(self.getDisplayLabel())
+        self.prop_iface.connect_to_signal('PropertiesChanged', self.on_properties_changed)
+        self.parent = parent # the parent widget with a redraw-method
 
-    def getBluezProp(self, prop_name):
-        return self.properties.Get('org.bluez.Device1', prop_name)
-
-    def getBluezProps(self):
-        return self.properties.GetAll('org.bluez.Device1')
+    def on_properties_changed(self, iface, new_values, sender=None):
+        if iface != 'org.bluez.Device1':
+            return
+        for k, v in new_values.items():
+            self.properties[k] = v
+        super(DeviceWidget, self).set_text(self.getDisplayLabel())
+        self.parent.redraw()
 
     def getDisplayLabel(self):
-        p = self.getBluezProps()
+        p = self.properties
         s = '{} ({})'.format(p.get('Name', 'Unnamed'), p['Address'])
         s += '\n   '
         s += '{}, {}'.format(
@@ -115,7 +120,7 @@ class BluetoothBrowser:
 
 
     def create_device_item(self, object_path):
-        w = DeviceWidget(self.bus.get_object(self.service, object_path))
+        w = DeviceWidget(self.bus.get_object(self.service, object_path), self)
         w = urwid.AttrWrap(w, 'item normal', 'item select')
         return w
 
@@ -137,6 +142,8 @@ class BluetoothBrowser:
         if key == 'G':
             self.devicesList.set_focus(len(self.devices) - 1)
 
+    def redraw(self):
+        self.loop.draw_screen()
     def main(self):
         widget = self.setup_view()
         self.loop = urwid.MainLoop(widget, self.palette,
