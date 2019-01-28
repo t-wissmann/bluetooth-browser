@@ -30,7 +30,7 @@ class DeviceWidget(urwid.Text):
 
     def getDisplayLabel(self):
         p = self.getBluezProps()
-        s = '{} ({})'.format(p['Name'], p['Address'])
+        s = '{} ({})'.format(p.get('Name', 'Unnamed'), p['Address'])
         s += '\n   '
         s += '{}, {}'.format(
             'paired' if p['Paired'] else 'unpaired',
@@ -58,14 +58,18 @@ class BluetoothBrowser:
         for s in dbus_child_paths(self.hci_object):
             yield '/'.join([self.hci_path, s])
 
+    def in_list(self, widget):
+        return urwid.AttrWrap(widget, \
+                            'item normal', 'item select')
+
     def setup_view(self):
         """return a widget as the root widget"""
-        self.powered_checkbox = urwid.CheckBox("power")
-        self.powered_checkbox = urwid.AttrWrap(self.powered_checkbox, \
-                            'item normal', 'item select')
-        self.scanning_checkbox = urwid.CheckBox("scanning")
-        self.scanning_checkbox = urwid.AttrWrap(self.scanning_checkbox, \
-                            'item normal', 'item select')
+        self.powered_checkbox = self.in_list(urwid.CheckBox("power (To be implemented)",
+            on_state_change=self.cb_power
+            ))
+        self.scanning_checkbox = self.in_list(urwid.CheckBox("scanning",
+            on_state_change=self.cb_scan
+            ))
         self.list_widgets = \
             [self.powered_checkbox,
              self.scanning_checkbox] \
@@ -76,6 +80,21 @@ class BluetoothBrowser:
         self.update_status()
         return self.devicesList
 
+    def cb_power(self, cb, new_state):
+        prop_iface = dbus.Interface(self.hci_object, 'org.freedesktop.DBus.Properties')
+        prop_iface.Set('org.bluez.Adapter1', 'Powered', new_state)
+        pass
+
+    def cb_scan(self, cb, new_state):
+        bluez_iface = dbus.Interface(self.hci_object, 'org.bluez.Adapter1')
+        if not self.properties['Powered']:
+            # FIXME: Show some status message
+            return
+        if new_state:
+            bluez_iface.StartDiscovery()
+        else:
+            bluez_iface.StopDiscovery()
+
     def update_status(self):
         prop_iface = dbus.Interface(self.hci_object, 'org.freedesktop.DBus.Properties')
         self.properties = prop_iface.GetAll('org.bluez.Adapter1')
@@ -83,6 +102,7 @@ class BluetoothBrowser:
             do_callback=False)
         self.scanning_checkbox.set_state(self.properties['Discovering'],
             do_callback=False)
+
 
     def create_device_item(self, object_path):
         w = DeviceWidget(self.bus.get_object(self.service, object_path))
